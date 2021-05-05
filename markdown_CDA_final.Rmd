@@ -1,6 +1,6 @@
 ---
 title: "CDA_final_html"
-author: "ID.349 and ID.329"
+author: "ID.349"
 date: '2020 year, may 27 d '
 output: html_document
 ---
