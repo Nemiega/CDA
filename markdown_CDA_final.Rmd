@@ -1,0 +1,459 @@
+---
+title: "CDA_final_html"
+author: "ID.349 and ID.329"
+date: '2020 year, may 27 d '
+output: html_document
+---
+
+########---------------------------------------
+
+#Let's read and load some data
+```{r}
+library(readr)
+time_series_covid19_recovered_global <- read_csv("time_series_covid19_recovered_global.csv")
+time_series_covid19_deaths_global <- read_csv("time_series_covid19_deaths_global.csv")
+time_series_covid19_confirmed_global <- read_csv("time_series_covid19_confirmed_global.csv")
+database_20200513<- read_csv("database_20200513_061217.csv")
+Global_Mobility_Report <- read_csv("Global_Mobility_Report.csv")
+```
+
+#Filter selected country: Belgium
+```{r}
+library(dplyr)
+bel_recover<-filter(time_series_covid19_recovered_global, `Country/Region`=="Belgium")
+bel_death<-filter(time_series_covid19_deaths_global, `Country/Region`=="Belgium")
+bel_confirm<-filter(time_series_covid19_confirmed_global, `Country/Region`=="Belgium")
+bel_data<-filter(database_20200513, `Country/Region`=="Belgium")
+bel_R5 <- filter(bel_data, `days_infectious`=="5")
+bel_mobility <-filter(Global_Mobility_Report, country_region=="Belgium")
+x <- is.na(bel_mobility$sub_region_1=="NA")
+bel_mobility <- bel_mobility[x,]
+```
+
+#Creating single data frame with all the values in one data frame for date: from 2020-03-07 till 2020-05-07
+##Binding covid data in rows and removing unnecesary colums
+```{r}
+dfr <-rbind(bel_recover,bel_death,bel_confirm)
+dfr$`Province/State`<-NULL
+dfr$`Country/Region`<-NULL
+dfr$Long<-NULL
+dfr$Lat<-NULL
+```
+
+#Filtering all data sets to have same date: from 2020-03-07 till 2020-05-07
+```{r}
+x <- colnames(dfr)
+y <- as.Date(x,"%m/%d/%y") >= "2020-03-07" & as.Date(x,"%m/%d/%y") <= "2020-05-07" 
+dfr <- dfr[,y]
+r5 <- bel_R5$R[bel_R5$Date <= "2020-05-07"]
+bel_mobility <- bel_mobility[bel_mobility$date >="2020-03-07",]
+```
+
+#Binding rows in to signle data
+```{r}
+dfr <- rbind(dfr,r5,bel_mobility$retail_and_recreation_percent_change_from_baseline,bel_mobility$grocery_and_pharmacy_percent_change_from_baseline,bel_mobility$parks_percent_change_from_baseline,bel_mobility$transit_stations_percent_change_from_baseline,bel_mobility$workplaces_percent_change_from_baseline,bel_mobility$residential_percent_change_from_baseline)
+rnames <-c("recovered","deaths", "confirmed", "R", "Retail and recreation", "Grocery and pharmacy", "Parks", "Transit stations", "Workplaces", "Residential")
+cnames <- c("dates",colnames(dfr))
+```
+
+# Final data frame:
+```{r}
+df <- cbind(rnames, dfr)
+names(df) <- cnames
+
+
+rm(bel_confirm,bel_data,bel_death,bel_mobility,bel_R5,bel_recover,dfr,r5,x,y,rnames,cnames)
+```
+removing unnecesary varaibles
+
+########---------------------------------------
+
+#Reshaping into long format
+```{r}
+df <- t(df)
+colnames(df) <-df[1,]
+df <- df[-1,]
+df <- as.data.frame(df)
+head(df)
+```
+
+#Convert values to numeric and create same data frame with differences
+```{r}
+
+for (i in 1:10) {
+  df[,i] <- as.numeric(as.character(df[,i])) 
+}
+
+ddf <- as.data.frame(sapply(df,function(x)diff(x)))
+head(ddf)
+```
+
+#Date column
+```{r}
+x <- rownames(df)
+rownames(df) <- NULL
+df <- cbind(x,df)
+colnames(df)[1] <- "Date"
+df$Date <- as.Date(as.character(df$Date),"%m/%d/%y")
+
+ddf <- cbind(x[1:61],ddf)
+colnames(ddf)[1] <- "Date"
+ddf$Date <- as.Date(as.character(ddf$Date),"%m/%d/%y")
+```
+
+########---------------------------------------
+
+#Exploratory data analysis
+##plots
+```{r}
+library(ggplot2)
+ggplot(df,aes(x=Date)) + geom_line(aes(y=deaths)) + geom_line(aes(y=recovered), color = "Blue") + geom_line(aes(y=confirmed), color = "Red") + ylab("Cases") + labs(title = "COVID spread") + labs(x)
+ggplot(ddf,aes(x=Date)) + geom_line(aes(y=deaths)) + geom_line(aes(y=recovered), color = "Blue") + geom_line(aes(y=confirmed), color = "Red") + ylab("Cases") + labs(title = "COVID cases differenced") + labs(x)
+ggplot(df,aes(x=Date)) + geom_line(aes(y=`Retail and recreation`))
+ggplot(df,aes(x=Date)) + geom_line(aes(y=`Grocery and pharmacy`))
+ggplot(df,aes(x=Date)) + geom_line(aes(y=`Parks`))  
+ggplot(df,aes(x=Date)) + geom_line(aes(y=`Transit stations`))   
+ggplot(df,aes(x=Date)) + geom_line(aes(y=`Workplaces`))   
+ggplot(df,aes(x=Date)) + geom_line(aes(y=`Residential`)) 
+ggplot(df,aes(x=Date)) + geom_line(aes(y=R))
+
+```
+
+########---------------------------------------
+
+# Task 4 
+##summary of the differiancial data set. We can see how it changed throught time 
+```{r}
+summary(ddf)
+```
+
+## Let's find out how Corona Virus quarantine affect confirmed case number growth
+###Numerical correlation plot
+```{r}
+library(corrplot)
+corrplot(cor(ddf[2:11]), method = "number")
+```
+
+From here we can see that SINGLE Corona factors does not have strong relationship with people mobility. However, let's analyse relantionship through regression model independently. 
+
+#Estimate simple model in diffrence data (confirmed cases versus mobility transition stations) and plot scatterplot
+```{r}
+CT <- lm(confirmed ~ `Transit stations`, data = ddf)
+summary(CT)
+
+ggplot(aes(x =confirmed , y = `Transit stations`), data =ddf) + geom_point()  + geom_smooth(method = "lm")
+```
+
+#Estimate simple model (confirmed cases versus mobility in recreation and retail)
+```{r}
+CRR<- lm( confirmed~ `Retail and recreation`  , data = ddf)
+summary(CRR)
+
+ggplot(aes(x = confirmed, y =`Retail and recreation` ), data =ddf) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+#Estimate simple model (confirmed cases versus mobility in workplaces)
+```{r}
+CW<- lm(confirmed~Workplaces, data = ddf)
+summary(CW)
+
+ggplot(aes(x =confirmed , y = Workplaces), data =ddf) + geom_point()  + geom_smooth(method = "lm")
+
+
+```
+
+#Also we can regress mobility in Grocery and pharmacy markets on reproduction rate
+```{r}
+RGP <- lm(R~`Grocery and pharmacy`, data = ddf)
+summary(RGP)
+
+ggplot(aes(x = R, y = `Grocery and pharmacy`), data =ddf) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+#Also we can regress reproduction rate on confirmed cases
+```{r}
+
+CR <- lm(confirmed~R, data = ddf)
+summary(CR)
+
+ggplot(aes(x = confirmed, y = R), data =ddf) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+###Conclusion:
+**We have done some linear testing and got the results that there is strong relationship between mobility restrictions and new Covid-19 cases. Since now people are less mobile, they stay home more often, because of strictly quarantine rules ==> there is less new confirmed cases, the reproduction rate deacreased in consequnces. These linear models confirms scientists and politicians expectations.**
+
+########---------------------------------------
+
+# task 5
+##summary of the data set. We can see how it changed throught time 
+```{r}
+summary(df)
+```
+
+#Correlation plot
+```{r}
+
+corrplot(cor(df[2:11]), method = "number")
+```
+
+It measures the pairwise relantionship in terms of correlation. Correlation measures the association between variables [-1:1]. Absolute values closer to 1 indicate that variables are more associated.
+
+#Estimate simple linear models of COVID impact on mobility data
+##We measure spread of COVID as R and confirmed + deaths. After runing regressions on mobility data we will determine which measure fits the effect of virus on the mobility better
+###Transit stations
+```{r}
+TC <- lm(`Transit stations` ~ confirmed + deaths, data = df)
+summary(TC)
+
+TR <- lm(`Transit stations` ~ R, data = df)
+summary(TR)
+
+ggplot(aes(x = `Transit stations`, y = confirmed), data =df) + geom_point()  + geom_smooth(method = "lm")
+ggplot(aes(x = `Transit stations`, y = R), data =df) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+#Mobility and recreation
+```{r}
+RRC <- lm(`Retail and recreation` ~ confirmed + deaths  , data = df)
+summary(RRC)
+
+RRR <- lm(`Retail and recreation` ~ R  , data = df)
+summary(RRR)
+
+ggplot(aes(x = `Retail and recreation`, y = confirmed), data =df) + geom_point()  + geom_smooth(method = "lm")
+ggplot(aes(x = `Retail and recreation`, y = R), data =df) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+#Workplaces
+```{r}
+
+WC <- lm(Workplaces~confirmed + deaths, data = df)
+summary(WC)
+
+WR <- lm(Workplaces~ R, data = df)
+summary(WR)
+
+ggplot(aes(x = Workplaces, y = confirmed), data =df) + geom_point()  + geom_smooth(method = "lm")
+ggplot(aes(x = Workplaces, y = R), data =df) + geom_point()  + geom_smooth(method = "lm")
+```
+
+#Parks
+```{r}
+PC <- lm(Parks ~ confirmed + deaths, data = df)
+summary(PC)
+
+PR <- lm(Parks ~ R, data = df)
+summary(PR)
+
+ggplot(aes(x = Parks, y = confirmed), data =df) + geom_point()  + geom_smooth(method = "lm")
+ggplot(aes(x = Parks, y = R), data =df) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+#Residential
+```{r}
+RC <- lm(Residential ~ confirmed + deaths, data=df)
+summary(RC)
+
+RR <- lm(Residential ~ R, data = df)
+summary(RR)
+
+ggplot(aes(x = Residential, y = confirmed), data =df) + geom_point()  + geom_smooth(method = "lm")
+ggplot(aes(x = Residential, y = R), data =df) + geom_point()  + geom_smooth(method = "lm")
+```
+
+### Conclusion of 5:
+*All of the mobility data where affected simillarly by the measures of COVID 19 spread: they all decreased significantly except for residential ares which are correlated negatively with COVID. Another exception is seen in parks which is unaffected by covid. Regression has a respectable fit thus high values of adjusted R-squared which means that data fits well.* 
+**R-squared is higher for measure of confirmed + deaths than for R so we conclude that it represents the impact of virus better than R. **
+
+#Also we can regress reproduction rate on confirmed cases to check how well it reflects the impact of COVID-19
+```{r}
+RC <- lm(R~confirmed + deaths, data = df)
+summary(RC)
+
+ggplot(aes(x = confirmed, y = R), data =df) + geom_point()  + geom_smooth(method = "lm")
+
+```
+
+## Conclusion of R:
+***Even though this might seem obvious it extremely high R-squared of 0.99 and high correlation between R, deaths and confirmed cases deffinetly ensures us that R (reproduction rate) is well fitting measure of pandemic spread. This is beneficial in current situation because we can use R as real time measure of COVID-19 severety. Negative correlation suggests that R is heavily affected by the implemented lockdown measures, as it significantly reduces the opportunities for virus to spread. It is also seen clearly from the grap of R where we can see that it declines sharply after implementation of social distancing. ***
+
+########---------------------------------------
+
+# Task 6
+## estimate linear models to forecast mobility changes
+###removing last week from the df
+```{r}
+df7 <- df[1:(nrow(df)-7),]
+```
+
+#Transit stations
+```{r}
+TC7 <- lm(`Transit stations` ~ confirmed + deaths, data = df7)
+p1 <- predict(TC7,df)
+#forecast error of last week
+fe <- df$`Transit stations`[55:62]-p1[55:62]
+#transit stations on R
+TC7R <- lm(`Transit stations` ~ R,df7)
+p1R <-predict(TC7R,df)
+feR <- df$`Transit stations`[55:62]-p1R[55:62]
+```
+
+###Prediction (on confirmed+deaths) and real data
+```{r}
+plot(df$Date,df$`Transit stations`, ylab = "Transport mobility", xlab = "date", main="diifrence between predicted and real mobility" ,type = "l", col="red" )
+lines(df$Date,p1, col="blue")
+legend("topleft", c("real","predicted"),fill=c("red","blue"))
+```
+
+###Prediction (on R) and real data 
+```{r}
+plot(df$Date,df$`Transit station`, ylab = "Transport mobility", xlab = "date", main="diifrence between predicted and real mobility" ,type = "l", col="red" )
+lines(df$Date,p1R, col="blue")
+legend("topleft", c("real","predicted"),fill=c("red","blue"))
+```
+
+
+##Conclusion 6:
+*Our lm based on confirmed + deaths predicts last week's values pretty accurately. However lm based on R has a large forecast error.*
+
+
+
+########---------------------------------------
+
+# task 7
+##Pick another similar country: Germany
+###Filter selected country
+```{r}
+de_recover<-filter(time_series_covid19_recovered_global, `Country/Region`=="Germany")
+de_death<-filter(time_series_covid19_deaths_global, `Country/Region`=="Germany")
+de_confirm<-filter(time_series_covid19_confirmed_global, `Country/Region`=="Germany")
+de_data<-filter(database_20200513, `Country/Region`=="Germany")
+de_R5 <- filter(de_data, `days_infectious`=="5")
+de_mobility <-filter(Global_Mobility_Report, country_region=="Germany")
+x <- is.na(de_mobility$sub_region_1=="NA")
+de_mobility <- de_mobility[x,]
+```
+
+#creating single data frame acording to date: 02/03/2020 - 10/05/2020
+```{r}
+dedf <-rbind(de_recover,de_death,de_confirm)
+dedf$`Province/State`<-NULL
+dedf$`Country/Region`<-NULL
+dedf$Long<-NULL
+dedf$Lat<-NULL
+
+x <- colnames(dedf)
+y <- as.Date(x,"%m/%d/%y") >= "2020-03-02" & as.Date(x,"%m/%d/%y") <= "2020-05-10" 
+dedf <- dedf[,y]
+der5 <- de_R5$R[de_R5$Date <= "2020-05-10"]
+de_mobility <- de_mobility[de_mobility$date >="2020-03-02",]
+
+dedf <- rbind(dedf,der5,de_mobility$retail_and_recreation_percent_change_from_baseline,de_mobility$grocery_and_pharmacy_percent_change_from_baseline,de_mobility$parks_percent_change_from_baseline,de_mobility$transit_stations_percent_change_from_baseline,de_mobility$workplaces_percent_change_from_baseline,de_mobility$residential_percent_change_from_baseline)
+rnames <-c("recovered","deaths", "confirmed", "R", "Retail and recreation", "Grocery and pharmacy", "Parks", "Transit stations", "Workplaces", "Residential")
+cnames <- c("dates",colnames(dedf))
+```
+
+```{r}
+# Final data frame:
+dedf <- cbind(rnames, dedf)
+names(dedf) <- cnames
+
+rm(de_confirm,de_data,de_death,de_mobility,de_R5,de_recover,der5,x,y,rnames,cnames,time_series_covid19_confirmed_global,time_series_covid19_deaths_global,time_series_covid19_recovered_global,Global_Mobility_Report,database_20200513)
+```
+removing unnecesary varaibles
+
+#Reshaping into long, Convert values to numeric and Date colum
+```{r}
+dedf <- t(dedf)
+colnames(dedf) <-dedf[1,]
+dedf <- dedf[-1,]
+dedf <- as.data.frame(dedf)
+
+
+for (i in 1:10) {
+  dedf[,i] <- as.numeric(as.character(dedf[,i])) 
+}
+
+
+x <- rownames(dedf)
+rownames(dedf) <- NULL
+dedf <- cbind(x,dedf)
+colnames(dedf)[1] <- "Date"
+dedf$Date <- as.Date(as.character(dedf$Date),"%m/%d/%y")
+```
+Germany dataset complete
+
+# Germany plots
+```{r}
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=deaths)) + geom_line(aes(y=recovered), color = "Blue") + geom_line(aes(y=confirmed), color = "Red") + ylab("Cases") + labs(title = "COVID spread") + labs(x)
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=`Retail and recreation`))
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=`Grocery and pharmacy`))
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=`Parks`))  
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=`Transit stations`))   
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=`Workplaces`))   
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=`Residential`)) 
+ggplot(dedf,aes(x=Date)) + geom_line(aes(y=R))
+
+```
+
+#Correlation plot
+```{r}
+corrplot(cor(dedf[2:11]), method = "number")
+```
+
+**From this plot we can see that that in Germany COVID impact (confirmed + deaths) has less impact on mobility than in Belgium. This might be due to reproduction rates in Geramny**
+
+# estimate linear models to forecast mobility changes
+## removing last week from the df
+```{r}
+dedf7 <- dedf[1:(nrow(dedf)-7),]
+
+#Transit stations
+deTC7 <- lm(`Transit stations` ~ confirmed + deaths, data = dedf7)
+dep1 <- predict(deTC7,dedf)
+#forecast error of last week
+defe <- dedf$`Transit stations`[55:62]-dep1[55:62]
+#transit stations on R
+deTC7R <- lm(`Transit stations` ~ R,dedf7)
+dep1R <-predict(deTC7R,dedf)
+defeR <- dedf$`Transit stations`[55:62]-dep1R[55:62]
+
+```
+
+###Prediction (on confirmed+deaths) and real data
+```{r}
+plot(dedf$Date,dedf$`Transit stations`, ylab = "Transport mobility", xlab = "date", main="diifrence between predicted and real mobility" ,type = "l", col="red" )
+lines(dedf$Date,dep1, col="blue")
+legend("topleft", c("real","predicted"),fill=c("red","blue"))
+```
+
+```{r}
+plot(dedf$Date,dedf$`Transit station`, ylab = "Transport mobility", xlab = "date", main="diifrence between predicted and real mobility" ,type = "l", col="red" )
+lines(dedf$Date,dep1R, col="blue")
+legend("topleft", c("real","predicted"),fill=c("red","blue"))
+```
+
+*It follows the same trend as Belgium model. Linear model of Germany based on confirmed + deaths predicts last week's values pretty accurately. However linear model based on R has a large forecast error.*
+
+# Now lets build model to see the causal effect between covid and mobility in Transit stations
+```{r}
+
+deT <- lm(`Transit stations` ~ confirmed + deaths, data = dedf)
+summary(deT)
+
+deTR <- lm(`Transit stations` ~ R, data = dedf)
+summary(deTR)
+
+```
+
+#Conclusion from lm of covid impact on Mobility in transit stations:
+**we can see that effects of change in both R and cofirmed + deaths are really simillar in both coutries. This is no surpirse since coutries are geographic neighbours with similar developemnt levels and culture. The same holds and for public transporation mobility on reproduction rate. From the time when quarantine has been declared (stoping all public transportation system) we can clearly see that reproduction rates have decreased too. **
+
+
+##THE END
